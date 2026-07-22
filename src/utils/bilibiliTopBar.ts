@@ -10,6 +10,12 @@ const BILIBILI_TOP_BAR_SELECTORS = [
   '.custom-navbar',
 ]
 
+const BILIBILI_TOP_BAR_SCROLL_TRIGGER_HEIGHT = 32
+const BILIBILI_TOP_BAR_SCROLL_PROXY_TOP = BILIBILI_TOP_BAR_SCROLL_TRIGGER_HEIGHT + 1
+const BILIBILI_TOP_BAR_SCROLL_PROXY_ID = 'bewly-bilibili-top-bar-scroll-proxy'
+const BILIBILI_TOP_BAR_SCROLL_SYNC_CLASS = 'bewly-bilibili-top-bar-scroll-sync'
+const BILIBILI_TOP_BAR_SCROLL_SYNC_STYLE_ID = 'bewly-bilibili-top-bar-scroll-sync-style'
+
 let cachedOriginalTopBar: HTMLElement | null = null
 
 function getDocumentTopBar(doc: Document): HTMLElement | null {
@@ -25,8 +31,111 @@ export function captureOriginalBilibiliTopBar(doc: Document) {
     return null
 
   cachedOriginalTopBar = header
-  cachedOriginalTopBar.querySelector('.bili-header__bar')?.classList.add('slide-down')
   return cachedOriginalTopBar
+}
+
+function getScrollingElement(doc: Document): Element {
+  return doc.scrollingElement || doc.documentElement
+}
+
+function dispatchScrollEvent(doc: Document) {
+  const win = doc.defaultView
+  if (win)
+    win.dispatchEvent(new win.Event('scroll'))
+}
+
+function ensureScrollSyncStyles(doc: Document) {
+  if (doc.getElementById(BILIBILI_TOP_BAR_SCROLL_SYNC_STYLE_ID))
+    return
+
+  const style = doc.createElement('style')
+  style.id = BILIBILI_TOP_BAR_SCROLL_SYNC_STYLE_ID
+  style.textContent = `
+html.${BILIBILI_TOP_BAR_SCROLL_SYNC_CLASS},
+html.${BILIBILI_TOP_BAR_SCROLL_SYNC_CLASS} body {
+  overflow: hidden !important;
+}
+html.${BILIBILI_TOP_BAR_SCROLL_SYNC_CLASS} #bewly {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100dvh !important;
+}
+`
+  const styleContainer = doc.head || doc.documentElement
+  styleContainer.append(style)
+}
+
+/**
+ * Bilibili's large homepage header only enables the channel popover after its own
+ * document scroll position passes 32px. Bewly pages scroll inside Shadow DOM, so
+ * mirror just that state into the outer document and let Bilibili update its own
+ * reactive header state.
+ */
+export function syncOriginalBilibiliTopBarScrollState(doc: Document, scrollTop: number) {
+  if (!doc.body)
+    return
+
+  ensureScrollSyncStyles(doc)
+
+  let scrollProxy = doc.getElementById(BILIBILI_TOP_BAR_SCROLL_PROXY_ID)
+  if (!scrollProxy) {
+    scrollProxy = doc.createElement('div')
+    scrollProxy.id = BILIBILI_TOP_BAR_SCROLL_PROXY_ID
+    scrollProxy.setAttribute('aria-hidden', 'true')
+    Object.assign(scrollProxy.style, {
+      height: `calc(100vh + ${BILIBILI_TOP_BAR_SCROLL_PROXY_TOP}px)`,
+      left: '0',
+      opacity: '0',
+      pointerEvents: 'none',
+      position: 'absolute',
+      top: '0',
+      width: '1px',
+    })
+    doc.body.append(scrollProxy)
+  }
+
+  doc.documentElement.classList.add(BILIBILI_TOP_BAR_SCROLL_SYNC_CLASS)
+
+  const isScrolled = scrollTop > BILIBILI_TOP_BAR_SCROLL_TRIGGER_HEIGHT
+  const mirroredScrollTop = isScrolled ? BILIBILI_TOP_BAR_SCROLL_PROXY_TOP : 0
+  const scrollingElement = getScrollingElement(doc)
+  const topBar = doc.querySelector<HTMLElement>('.bili-header .bili-header__bar')
+  const shouldNotifyBilibili = scrollingElement.scrollTop !== mirroredScrollTop
+    || Boolean(topBar?.classList.contains('slide-down')) !== isScrolled
+
+  // Keep the visual state in sync immediately while Bilibili's throttled listener
+  // updates the reactive state that controls whether the popover is rendered.
+  topBar?.classList.toggle('slide-down', isScrolled)
+  scrollingElement.scrollTop = mirroredScrollTop
+
+  if (shouldNotifyBilibili)
+    dispatchScrollEvent(doc)
+}
+
+export function resetOriginalBilibiliTopBarScrollState(doc: Document) {
+  const scrollProxy = doc.getElementById(BILIBILI_TOP_BAR_SCROLL_PROXY_ID)
+  const scrollSyncStyle = doc.getElementById(BILIBILI_TOP_BAR_SCROLL_SYNC_STYLE_ID)
+  const isSyncing = doc.documentElement.classList.contains(BILIBILI_TOP_BAR_SCROLL_SYNC_CLASS)
+  if (!scrollProxy && !isSyncing) {
+    scrollSyncStyle?.remove()
+    return
+  }
+
+  const scrollingElement = getScrollingElement(doc)
+  const topBar = doc.querySelector<HTMLElement>('.bili-header .bili-header__bar')
+  const shouldNotifyBilibili = scrollingElement.scrollTop !== 0
+    || Boolean(topBar?.classList.contains('slide-down'))
+
+  topBar?.classList.remove('slide-down')
+  scrollingElement.scrollTop = 0
+
+  if (shouldNotifyBilibili)
+    dispatchScrollEvent(doc)
+
+  scrollProxy?.remove()
+  scrollSyncStyle?.remove()
+  doc.documentElement.classList.remove(BILIBILI_TOP_BAR_SCROLL_SYNC_CLASS)
 }
 
 export function detachOriginalBilibiliTopBar(doc: Document) {

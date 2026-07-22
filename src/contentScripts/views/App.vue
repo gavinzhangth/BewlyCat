@@ -14,6 +14,7 @@ import type { DockItem } from '~/stores/mainStore'
 import { useMainStore } from '~/stores/mainStore'
 import { useSettingsStore } from '~/stores/settingsStore'
 import { useTopBarStore } from '~/stores/topBarStore'
+import { resetOriginalBilibiliTopBarScrollState, syncOriginalBilibiliTopBarScrollState } from '~/utils/bilibiliTopBar'
 import { isHomePage, isInIframe, isNotificationPage, isSearchResultsPage, isVideoOrBangumiPage, openLinkToNewTab, queryDomUntilFound, scrollToTop } from '~/utils/main'
 import emitter from '~/utils/mitt'
 
@@ -311,6 +312,32 @@ const showBewlyPage = computed((): boolean => {
 
   return isHomePage() && !settings.value.useOriginalBilibiliHomepage
 })
+
+function shouldSyncOriginalBilibiliTopBarScroll(): boolean {
+  return showBewlyPage.value
+    && settings.value.useOriginalBilibiliTopBar
+    && !settings.value.useOriginalBilibiliHomepage
+}
+
+function updateOriginalBilibiliTopBarScrollState(scrollTop = scrollViewportRef.value?.scrollTop ?? 0) {
+  if (shouldSyncOriginalBilibiliTopBarScroll())
+    syncOriginalBilibiliTopBarScrollState(document, scrollTop)
+  else
+    resetOriginalBilibiliTopBarScrollState(document)
+}
+
+watch(
+  [
+    showBewlyPage,
+    () => settings.value.useOriginalBilibiliHomepage,
+    () => settings.value.useOriginalBilibiliTopBar,
+  ],
+  () => nextTick(() => updateOriginalBilibiliTopBarScrollState()),
+  { immediate: true, flush: 'post' },
+)
+
+onBeforeUnmount(() => resetOriginalBilibiliTopBarScrollState(document))
+
 const showTopBar = computed((): boolean => {
   // When using the open in drawer feature, the iframe inside the page will hide the top bar
   if (isVideoOrBangumiPage() && isInIframe())
@@ -555,6 +582,9 @@ function handleOsScroll(_instance: any, event: Event) {
     const scrollTop = latestScrollTop
 
     emitter.emit(OVERLAY_SCROLL_BAR_SCROLL, scrollTop)
+
+    if (shouldSyncOriginalBilibiliTopBarScroll())
+      syncOriginalBilibiliTopBarScrollState(document, scrollTop)
 
     // 只在滚动距离超过阈值时更新状态
     const scrollDelta = Math.abs(scrollTop - lastScrollTop)
