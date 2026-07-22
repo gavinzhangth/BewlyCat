@@ -857,6 +857,8 @@ favorites:
   global_search_hint: 请输入关键词以搜索全部收藏夹
 watch_later:
   title: 稍后再看
+  add_current_video: 添加到稍后再看
+  remove_current_video: 从稍后再看中移除
   clear_all: 清空稍后再看
   clear_all_confirm: |-
     要清空稍后再看吗？

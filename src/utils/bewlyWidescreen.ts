@@ -486,8 +486,7 @@ function injectLayoutStyle() {
     body.${BODY_CLASS} #biliMainHeader,
     body.${BODY_CLASS} #bili-header-container,
     body.${BODY_CLASS} .fixed-sidenav-storage,
-    body.${BODY_CLASS} .mini-player-window,
-    body.${BODY_CLASS} .bewly-watch-later-btn {
+    body.${BODY_CLASS} .mini-player-window {
       display: none !important;
     }
 
@@ -1029,6 +1028,10 @@ function injectLayoutStyle() {
       overflow: visible !important;
     }
 
+    #${ROOT_ID} .bewly-widescreen-action-slot .video-toolbar-left-main:has(.bewly-watch-later-btn) {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
     #${ROOT_ID} .bewly-widescreen-action-slot .toolbar-left-item-wrap {
       display: flex !important;
       justify-content: center !important;
@@ -1175,6 +1178,11 @@ function injectLayoutStyle() {
       height: 19px !important;
     }
 
+    #${ROOT_ID} .bewly-widescreen-action-slot .bewly-watch-later-icon {
+      width: 18px !important;
+      height: 18px !important;
+    }
+
     #${ROOT_ID} .bewly-widescreen-action-slot .video-toolbar-item-text,
     #${ROOT_ID} .bewly-widescreen-action-slot .video-like-info,
     #${ROOT_ID} .bewly-widescreen-action-slot .video-coin-info,
@@ -1190,10 +1198,6 @@ function injectLayoutStyle() {
     }
 
     #${ROOT_ID} .bewly-widescreen-action-slot .video-toolbar-right {
-      display: none !important;
-    }
-
-    #${ROOT_ID} .bewly-widescreen-action-slot .bewly-watch-later-btn {
       display: none !important;
     }
 

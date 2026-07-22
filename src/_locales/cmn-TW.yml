@@ -872,6 +872,8 @@ favorites:
   search_placeholder: 搜尋目前收藏夾
 watch_later:
   title: 稍後觀看
+  add_current_video: 加入稍後觀看
+  remove_current_video: 從稍後觀看中移除
   clear_all: 清空稍後觀看
   clear_all_confirm: |-
     要清空稍後觀看的影片嗎？

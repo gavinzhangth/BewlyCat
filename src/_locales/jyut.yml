@@ -805,6 +805,8 @@ favorites:
     噉做冇得返轉頭噃，你確定要剷走呢啲片？
 watch_later:
   title: 陣間至睇
+  add_current_video: 加入陣間至睇
+  remove_current_video: 從陣間至睇移除
   clear_all: 剷曬陣間至睇啲片
   clear_all_confirm: |-
     係咪要剷曬陣間至睇啲片呀？

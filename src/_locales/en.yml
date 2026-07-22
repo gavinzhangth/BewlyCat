@@ -935,6 +935,8 @@ favorites:
   search_placeholder: Search for current favorites
 watch_later:
   title: Watch Later
+  add_current_video: Add to Watch Later
+  remove_current_video: Remove from Watch Later
   clear_all: Clear all watch later
   clear_all_confirm: >-
     Clear all watch later?

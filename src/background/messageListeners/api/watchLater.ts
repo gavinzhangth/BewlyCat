@@ -27,12 +27,10 @@ const API_WATCHLATER = {
         'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
       },
       body: {
+        aid: 0,
         viewed: false,
         csrf: '',
       },
-    },
-    params: {
-      aid: 0,
     },
     afterHandle: AHS.J_D,
   },

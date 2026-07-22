@@ -153,7 +153,134 @@ else {
   let lastVideoNavigationKey = getVideoNavigationKey(location.href)
   let hasAppliedPlayerMode = false // 添加标志变量
   let playerModeRetryTimer: ReturnType<typeof setTimeout> | undefined
-  let watchLaterButtonAdded = false // 标记稍后再看按钮是否已添加
+  let watchLaterButtonMountController: AbortController | undefined
+  let watchLaterButtonScheduleId = 0
+  const WATCH_LATER_TOOLBAR_SELECTOR = '.video-toolbar-left-main, .video-toolbar-left'
+
+  function cancelWatchLaterButtonSchedule() {
+    watchLaterButtonScheduleId += 1
+    watchLaterButtonMountController?.abort()
+    watchLaterButtonMountController = undefined
+  }
+
+  function removeExternalWatchLaterButton() {
+    cancelWatchLaterButtonSchedule()
+    document.querySelector('.bewly-watch-later-wrap')?.remove()
+    document.querySelector('.bewly-watch-later-btn')?.remove()
+  }
+
+  function getWatchLaterToolbar() {
+    const leftToolbar = document.querySelector<HTMLElement>(WATCH_LATER_TOOLBAR_SELECTOR)
+    if (leftToolbar)
+      return leftToolbar
+
+    return document.querySelector<HTMLElement>('.video-tool-more')?.parentElement ?? undefined
+  }
+
+  function waitForPageLoad(signal: AbortSignal) {
+    if (signal.aborted)
+      return Promise.resolve(false)
+    if (document.readyState === 'complete')
+      return Promise.resolve(true)
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false
+      let onLoad = () => {}
+      let onAbort = () => {}
+      const finish = (loaded: boolean) => {
+        if (settled)
+          return
+        settled = true
+        window.removeEventListener('load', onLoad)
+        signal.removeEventListener('abort', onAbort)
+        resolve(loaded)
+      }
+      onLoad = () => finish(true)
+      onAbort = () => finish(false)
+
+      window.addEventListener('load', onLoad, { once: true })
+      signal.addEventListener('abort', onAbort, { once: true })
+    })
+  }
+
+  function waitForWatchLaterToolbar(signal: AbortSignal) {
+    const existingToolbar = getWatchLaterToolbar()
+    if (existingToolbar || signal.aborted)
+      return Promise.resolve(existingToolbar)
+
+    return new Promise<HTMLElement | undefined>((resolve) => {
+      let settled = false
+      let observer: MutationObserver | undefined
+      let onAbort = () => {}
+      const finish = (toolbar?: HTMLElement) => {
+        if (settled)
+          return
+        settled = true
+        observer?.disconnect()
+        signal.removeEventListener('abort', onAbort)
+        resolve(toolbar)
+      }
+      onAbort = () => finish()
+      observer = new MutationObserver(() => {
+        const toolbar = getWatchLaterToolbar()
+        if (toolbar)
+          finish(toolbar)
+      })
+
+      observer.observe(document.body ?? document.documentElement, {
+        childList: true,
+        subtree: true,
+      })
+      signal.addEventListener('abort', onAbort, { once: true })
+
+      // Avoid missing a toolbar inserted between the initial query and observer setup.
+      const toolbar = getWatchLaterToolbar()
+      if (toolbar)
+        finish(toolbar)
+    })
+  }
+
+  function waitForNextPaint(signal: AbortSignal) {
+    if (signal.aborted)
+      return Promise.resolve(false)
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false
+      let frameId: number | undefined
+      let onAbort = () => {}
+      const finish = (painted: boolean) => {
+        if (settled)
+          return
+        settled = true
+        if (frameId !== undefined)
+          cancelAnimationFrame(frameId)
+        signal.removeEventListener('abort', onAbort)
+        resolve(painted)
+      }
+      onAbort = () => finish(false)
+
+      signal.addEventListener('abort', onAbort, { once: true })
+      frameId = requestAnimationFrame(() => finish(true))
+    })
+  }
+
+  async function waitForStableWatchLaterToolbar(signal: AbortSignal) {
+    while (!signal.aborted) {
+      const toolbar = await waitForWatchLaterToolbar(signal)
+      if (!toolbar)
+        return undefined
+
+      // Confirm that Bilibili did not replace the server-rendered toolbar while
+      // hydrating it. Two frames are enough without imposing an arbitrary delay.
+      if (!await waitForNextPaint(signal) || !await waitForNextPaint(signal))
+        return undefined
+
+      if (toolbar.isConnected && getWatchLaterToolbar() === toolbar)
+        return toolbar
+    }
+
+    return undefined
+  }
 
   function shouldApplyBewlyDesign() {
     if (settings.value.adaptToOtherPageStyles)
@@ -309,7 +436,7 @@ else {
     }, 2000)
     hasAppliedPlayerMode = true // 标记已应用
 
-    // 延迟添加稍后再看按钮
+    // 等待 B 站完成播放器和工具栏的首次渲染后再挂载，避免干扰播放初始化
     scheduleAddWatchLaterButton()
   }
 
@@ -330,24 +457,54 @@ else {
     }, document.visibilityState === 'visible' ? 500 : 1000)
   }
 
-  // 延迟添加稍后再看按钮
+  // 设置、页面和最终工具栏就绪后立即添加，不依赖固定延时。
   function scheduleAddWatchLaterButton() {
-  // 如果已经添加过或者设置未启用，直接返回
-    if (watchLaterButtonAdded || !settings.value.externalWatchLaterButton) {
-      return
-    }
+    cancelWatchLaterButtonSchedule()
 
-    // 等待播放器模式调整和滚动完成
-    // RetryTask最多20次*500ms=10s，滚动最多3s，再加1s保险 = 14s
-    // 实际上大部分情况会更快完成，这里取一个保守值
-    setTimeout(() => {
-      if (!watchLaterButtonAdded && settings.value.externalWatchLaterButton) {
-        import('~/utils/watchLaterButton').then(({ addWatchLaterButton }) => {
-          addWatchLaterButton()
-          watchLaterButtonAdded = true
-        }).catch(err => console.error('添加稍后再看按钮失败:', err))
+    if (!settings.value.externalWatchLaterButton || !isVideoPage())
+      return
+
+    if (document.querySelector('.bewly-watch-later-btn'))
+      return
+
+    const scheduleId = watchLaterButtonScheduleId
+    const controller = new AbortController()
+    watchLaterButtonMountController = controller
+
+    void Promise.all([
+      settingsReady,
+      waitForPageLoad(controller.signal),
+      import('~/utils/watchLaterButton'),
+    ]).then(async ([, pageLoaded, { addWatchLaterButton }]) => {
+      if (!pageLoaded)
+        return
+
+      const toolbar = await waitForStableWatchLaterToolbar(controller.signal)
+      if (!toolbar
+        || controller.signal.aborted
+        || scheduleId !== watchLaterButtonScheduleId
+        || !settings.value.externalWatchLaterButton
+        || !isVideoPage()) {
+        return
       }
-    }, 5000) // 5秒后添加，确保页面已完全稳定
+
+      // The dynamic import can finish on a later frame, so verify the exact
+      // toolbar node once more immediately before mutating Bilibili's DOM.
+      if (getWatchLaterToolbar() !== toolbar) {
+        scheduleAddWatchLaterButton()
+        return
+      }
+
+      const buttonAdded = addWatchLaterButton(settings.value.language)
+      if (watchLaterButtonMountController === controller)
+        watchLaterButtonMountController = undefined
+
+      if (!buttonAdded && scheduleId === watchLaterButtonScheduleId)
+        scheduleAddWatchLaterButton()
+    }).catch((error) => {
+      if (!controller.signal.aborted)
+        console.error('添加稍后再看按钮失败:', error)
+    })
   }
 
   // 初始化随机播放功能
@@ -407,7 +564,7 @@ else {
         exitBewlyWidescreen()
         resetVerticalVideoZoom()
         hasAppliedPlayerMode = false // URL变化时重置标志
-        watchLaterButtonAdded = false // URL变化时重置稍后再看按钮标志
+        removeExternalWatchLaterButton()
         // 不再重置用户手动修改标志，保持用户的自动播放偏好设置
 
         // 重置随机播放初始化状态，避免重复加载
@@ -742,16 +899,11 @@ else {
       if (newSettings.externalWatchLaterButton !== oldSettings.externalWatchLaterButton) {
         if (newSettings.externalWatchLaterButton) {
         // 启用稍后再看按钮
-          watchLaterButtonAdded = false // 重置标志
           scheduleAddWatchLaterButton()
         }
         else {
         // 移除稍后再看按钮
-          const existingButton = document.querySelector('.bewly-watch-later-btn')
-          if (existingButton) {
-            existingButton.remove()
-            watchLaterButtonAdded = false
-          }
+          removeExternalWatchLaterButton()
         }
       }
     }
